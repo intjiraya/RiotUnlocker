@@ -44,16 +44,42 @@ jobs:
 
       - name: Generate release notes
         id: notes
+        shell: bash
         run: |
-          latest=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+$' | sed -n '2p')
-          if [ -z "$latest" ]; then
-            log=$(git log --pretty="- %s" HEAD)
-          else
-            log=$(git log --pretty="- %s" ${latest}..HEAD^)
-          fi
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$log" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          prev=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+$' | sed -n '2p' || true)
+          range="${prev:+${prev}..}HEAD"
+          subjects=$(git log --pretty=format:'%s' "$range")
+
+          section() {
+            printf '%s\n' "$subjects" \
+              | { grep -E "$1" || true; } \
+              | sed -E 's/^[a-z]+(\([^)]+\))?:[[:space:]]*/- /'
+          }
+
+          others_fn() {
+            printf '%s\n' "$subjects" \
+              | { grep -vE '^(feat|fix|docs|ci|build|chore|refactor|test|style|perf)(\([^)]+\))?:' || true; } \
+              | sed 's/^/- /'
+          }
+
+          feats=$(section '^feat(\([^)]+\))?:')
+          fixes=$(section '^fix(\([^)]+\))?:')
+          perf=$(section '^perf(\([^)]+\))?:')
+          others=$(others_fn)
+
+          notes=""
+          [ -n "$feats"  ] && notes+="### Features"$'\n'"$feats"$'\n\n'
+          [ -n "$fixes"  ] && notes+="### Bug Fixes"$'\n'"$fixes"$'\n\n'
+          [ -n "$perf"   ] && notes+="### Performance"$'\n'"$perf"$'\n\n'
+          [ -n "$others" ] && notes+="### Other"$'\n'"$others"$'\n\n'
+          [ -z "$notes"  ] && notes="_No user-facing changes._"
+
+          {
+            echo "notes<<NOTES_EOF"
+            printf '%s' "$notes"
+            echo
+            echo "NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: tag
