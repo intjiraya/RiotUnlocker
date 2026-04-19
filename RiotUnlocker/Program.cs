@@ -73,7 +73,24 @@ class Program
 
         try
         {
-            if (IsAlreadyPatched(dllPath))
+            using var module = ModuleDefinition.ReadModule(dllPath,
+                new ReaderParameters { ReadWrite = true });
+
+            var cheatType = module.Types.FirstOrDefault(t => t.Name == "Cheat")
+                ?? throw new InvalidOperationException(
+                    "Type 'Cheat' not found — game version may be unsupported");
+
+            var field = cheatType.Fields.FirstOrDefault(f => f.Name == "EVERYTHING_UNLOCKED")
+                ?? throw new InvalidOperationException(
+                    "Field 'Cheat.EVERYTHING_UNLOCKED' not found — game version may be unsupported");
+
+            if (!field.IsStatic)
+                throw new InvalidOperationException(
+                    "Field 'Cheat.EVERYTHING_UNLOCKED' is not static — unexpected game version");
+
+            var cctor = cheatType.Methods.FirstOrDefault(m => m.Name == ".cctor");
+
+            if (cctor != null && IsFieldSetInCctor(cctor, field))
             {
                 Warn("DLL is already patched, skipping");
                 return true;
@@ -85,12 +102,6 @@ class Program
                 Console.WriteLine($"Backup: {backupPath}");
             }
 
-            using var module = ModuleDefinition.ReadModule(dllPath, new ReaderParameters { ReadWrite = true });
-
-            var cheatType = module.Types.First(t => t.Name == "Cheat");
-            var field = cheatType.Fields.First(f => f.Name == "EVERYTHING_UNLOCKED");
-
-            var cctor = cheatType.Methods.FirstOrDefault(m => m.Name == ".cctor");
             if (cctor == null)
             {
                 cctor = new MethodDefinition(".cctor",
@@ -98,7 +109,9 @@ class Program
                     MethodAttributes.SpecialName | MethodAttributes.RTSpecialName |
                     MethodAttributes.Static,
                     module.TypeSystem.Void);
+                cctor.Body = new MethodBody(cctor);
                 cheatType.Methods.Add(cctor);
+
                 var il = cctor.Body.GetILProcessor();
                 il.Append(il.Create(OpCodes.Ldc_I4_1));
                 il.Append(il.Create(OpCodes.Stsfld, field));
@@ -106,10 +119,14 @@ class Program
             }
             else
             {
+                if (cctor.Body.Instructions.Count == 0)
+                    throw new InvalidOperationException(
+                        "Cheat..cctor has empty body — unexpected game version");
+
                 var il = cctor.Body.GetILProcessor();
                 var first = cctor.Body.Instructions[0];
+                il.InsertBefore(first, il.Create(OpCodes.Ldc_I4_1));
                 il.InsertBefore(first, il.Create(OpCodes.Stsfld, field));
-                il.InsertBefore(cctor.Body.Instructions[0], il.Create(OpCodes.Ldc_I4_1));
             }
 
             module.Write();
@@ -122,20 +139,12 @@ class Program
         }
     }
 
-    static bool IsAlreadyPatched(string dllPath)
+    static bool IsFieldSetInCctor(MethodDefinition cctor, FieldDefinition field)
     {
-        try
-        {
-            using var module = ModuleDefinition.ReadModule(dllPath);
-            var cheatType = module.Types.FirstOrDefault(t => t.Name == "Cheat");
-            if (cheatType == null) return false;
-            var cctor = cheatType.Methods.FirstOrDefault(m => m.Name == ".cctor");
-            if (cctor == null) return false;
-            return cctor.Body.Instructions.Any(i =>
-                i.OpCode == OpCodes.Stsfld && i.Operand is FieldReference fr &&
-                fr.Name == "EVERYTHING_UNLOCKED");
-        }
-        catch { return false; }
+        return cctor.Body.Instructions.Any(i =>
+            i.OpCode == OpCodes.Stsfld &&
+            i.Operand is FieldReference fr &&
+            fr.Name == field.Name);
     }
 
     static bool WritePrefs(string prefsDir)
