@@ -26,3 +26,7 @@ RiotUnlocker "path/to/Riot_Data/Managed/Assembly-CSharp.dll"
 ```
 cp Assembly-CSharp.dll.bak Assembly-CSharp.dll
 ```
+
+## License
+
+Apache 2.0 — see [LICENSE](LICENSE).
