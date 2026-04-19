@@ -39,6 +39,7 @@ class Program
             (dllPath, prefsDir) = FindGamePaths();
         }
 
+        int exitCode;
         if (dllPath == null || !File.Exists(dllPath))
         {
             Error("Could not find Assembly-CSharp.dll");
@@ -47,26 +48,45 @@ class Program
             Console.WriteLine();
             Console.WriteLine("Expected location:");
             Console.WriteLine("  Steam/steamapps/common/RIOT/Riot_Data/Managed/Assembly-CSharp.dll");
-            return 1;
+            exitCode = 1;
+        }
+        else
+        {
+            Console.WriteLine($"Game DLL : {dllPath}");
+            if (prefsDir != null)
+                Console.WriteLine($"Prefs dir: {prefsDir}");
+            Console.WriteLine();
+
+            bool dllOk = PatchDll(dllPath);
+            bool prefsOk = prefsDir != null && WritePrefs(prefsDir);
+
+            Console.WriteLine();
+            if (dllOk)
+                Ok("DLL patch applied — EVERYTHING_UNLOCKED = true");
+            if (prefsOk)
+                Ok("Save file written — all missions marked complete");
+
+            Console.WriteLine();
+            Console.WriteLine("Done! Start the game and all missions will be available.");
+            exitCode = dllOk ? 0 : 1;
         }
 
-        Console.WriteLine($"Game DLL : {dllPath}");
-        if (prefsDir != null)
-            Console.WriteLine($"Prefs dir: {prefsDir}");
-        Console.WriteLine();
+        PauseIfInteractive();
+        return exitCode;
+    }
 
-        bool dllOk = PatchDll(dllPath);
-        bool prefsOk = prefsDir != null && WritePrefs(prefsDir);
-
-        Console.WriteLine();
-        if (dllOk)
-            Ok("DLL patch applied — EVERYTHING_UNLOCKED = true");
-        if (prefsOk)
-            Ok("Save file written — all missions marked complete");
+    static void PauseIfInteractive()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return;
+        if (Console.IsInputRedirected || Console.IsOutputRedirected)
+            return;
 
         Console.WriteLine();
-        Console.WriteLine("Done! Start the game and all missions will be available.");
-        return dllOk ? 0 : 1;
+        Console.Write("Press any key to exit...");
+        try { Console.ReadKey(intercept: true); }
+        catch (InvalidOperationException) { }
+        Console.WriteLine();
     }
 
     static bool PatchDll(string dllPath)
