@@ -3,9 +3,18 @@ name: Release
 on:
   push:
     branches: [main]
+    paths:
+      - 'RiotUnlocker/**'
+      - '.github/workflows/release.yml'
+      - 'RiotUnlocker.slnx'
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   tag:
