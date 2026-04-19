@@ -131,11 +131,13 @@ jobs:
 
       - name: Package (zip)
         if: matrix.pack == 'zip'
-        run: zip -j ${{ matrix.archive }} dist/${{ matrix.artifact }}
+        run: zip -j ${{ matrix.archive }} dist/${{ matrix.artifact }} LICENSE
 
       - name: Package (tar)
         if: matrix.pack == 'tar'
-        run: tar -czf ${{ matrix.archive }} -C dist ${{ matrix.artifact }}
+        run: |
+          cp LICENSE dist/
+          tar -czf ${{ matrix.archive }} -C dist ${{ matrix.artifact }} LICENSE
 
       - uses: actions/upload-artifact@v4
         with:
