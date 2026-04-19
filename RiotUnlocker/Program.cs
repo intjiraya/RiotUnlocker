@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Xml;
+using System.Xml.Linq;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -154,32 +156,91 @@ class Program
             Directory.CreateDirectory(prefsDir);
             var prefsPath = Path.Combine(prefsDir, "prefs");
 
-            var lines = new List<string> { "<unity_prefs version_major=\"1\" version_minor=\"1\">" };
-
-            void AddLevel(string name)
+            XDocument doc;
+            if (File.Exists(prefsPath))
             {
-                lines.Add($"\t<pref name=\"{name}_PoliceIsCompleted\" type=\"string\">True</pref>");
-                lines.Add($"\t<pref name=\"{name}_RebelsIsCompleted\" type=\"string\">True</pref>");
-                lines.Add($"\t<pref name=\"{name}_PoliceIsNeverPlayed\" type=\"string\">False</pref>");
-                lines.Add($"\t<pref name=\"{name}_RebelsIsNeverPlayed\" type=\"string\">False</pref>");
-                lines.Add($"\t<pref name=\"{name}_PoliceScore\" type=\"float\">100</pref>");
-                lines.Add($"\t<pref name=\"{name}_RebelsScore\" type=\"float\">100</pref>");
+                var backupPath = prefsPath + ".bak";
+                if (!File.Exists(backupPath))
+                {
+                    File.Copy(prefsPath, backupPath);
+                    Console.WriteLine($"Prefs backup: {backupPath}");
+                }
+
+                try
+                {
+                    doc = XDocument.Load(prefsPath);
+                }
+                catch (XmlException)
+                {
+                    Warn("Existing prefs file is not valid XML — rewriting from scratch");
+                    doc = NewPrefsDocument();
+                }
             }
+            else
+            {
+                doc = NewPrefsDocument();
+            }
+
+            if (doc.Root is null || doc.Root.Name.LocalName != "unity_prefs")
+            {
+                Warn("Existing prefs root is not <unity_prefs> — rewriting from scratch");
+                doc = NewPrefsDocument();
+            }
+            var root = doc.Root!;
 
             foreach (var level in Levels)
             {
-                AddLevel(level);
-                AddLevel("GLOBAL_" + level);
+                WriteLevel(root, level);
+                WriteLevel(root, "GLOBAL_" + level);
             }
 
-            lines.Add("</unity_prefs>");
-            File.WriteAllLines(prefsPath, lines);
+            var settings = new XmlWriterSettings
+            {
+                Indent = true,
+                IndentChars = "\t",
+                OmitXmlDeclaration = true,
+            };
+            using var writer = XmlWriter.Create(prefsPath, settings);
+            doc.Save(writer);
             return true;
         }
         catch (Exception ex)
         {
             Error($"Prefs write failed: {ex.Message}");
             return false;
+        }
+    }
+
+    static XDocument NewPrefsDocument() =>
+        new(new XElement("unity_prefs",
+            new XAttribute("version_major", "1"),
+            new XAttribute("version_minor", "1")));
+
+    static void WriteLevel(XElement root, string name)
+    {
+        SetPref(root, $"{name}_PoliceIsCompleted", "string", "True");
+        SetPref(root, $"{name}_RebelsIsCompleted", "string", "True");
+        SetPref(root, $"{name}_PoliceIsNeverPlayed", "string", "False");
+        SetPref(root, $"{name}_RebelsIsNeverPlayed", "string", "False");
+        SetPref(root, $"{name}_PoliceScore", "float", "100");
+        SetPref(root, $"{name}_RebelsScore", "float", "100");
+    }
+
+    static void SetPref(XElement root, string name, string type, string value)
+    {
+        var existing = root.Elements("pref")
+            .FirstOrDefault(e => (string?)e.Attribute("name") == name);
+        if (existing != null)
+        {
+            existing.SetAttributeValue("type", type);
+            existing.Value = value;
+        }
+        else
+        {
+            root.Add(new XElement("pref",
+                new XAttribute("name", name),
+                new XAttribute("type", type),
+                value));
         }
     }
 
