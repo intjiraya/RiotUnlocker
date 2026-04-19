@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      notes: ${{ steps.notes.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version tag
+        id: tag
+        run: |
+          latest=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+$' | head -1)
+          if [ -z "$latest" ]; then
+            next="v1.0"
+          else
+            major=$(echo $latest | cut -d. -f1 | tr -d v)
+            minor=$(echo $latest | cut -d. -f2)
+            next="v${major}.$((minor + 1))"
+          fi
+          echo "tag=$next" >> $GITHUB_OUTPUT
+          git tag $next
+          git push origin $next
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          latest=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+$' | sed -n '2p')
+          if [ -z "$latest" ]; then
+            log=$(git log --pretty="- %s" HEAD)
+          else
+            log=$(git log --pretty="- %s" ${latest}..HEAD^)
+          fi
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$log" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+  build:
+    needs: tag
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            artifact: RiotUnlocker.exe
+            archive: RiotUnlocker-win-x64.zip
+            pack: zip
+          - rid: win-arm64
+            artifact: RiotUnlocker.exe
+            archive: RiotUnlocker-win-arm64.zip
+            pack: zip
+          - rid: linux-x64
+            artifact: RiotUnlocker
+            archive: RiotUnlocker-linux-x64.tar.gz
+            pack: tar
+          - rid: linux-arm64
+            artifact: RiotUnlocker
+            archive: RiotUnlocker-linux-arm64.tar.gz
+            pack: tar
+          - rid: osx-x64
+            artifact: RiotUnlocker
+            archive: RiotUnlocker-osx-x64.tar.gz
+            pack: tar
+          - rid: osx-arm64
+            artifact: RiotUnlocker
+            archive: RiotUnlocker-osx-arm64.tar.gz
+            pack: tar
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+
+      - name: Publish
+        run: |
+          dotnet publish RiotUnlocker/RiotUnlocker.csproj \
+            -c Release -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:PublishSingleFile=true \
+            -p:EnableCompressionInSingleFile=true \
+            -p:AssemblyVersion=$(echo "${{ needs.tag.outputs.tag }}" | tr -d v).0.0 \
+            -o dist
+
+      - name: Package (zip)
+        if: matrix.pack == 'zip'
+        run: zip -j ${{ matrix.archive }} dist/${{ matrix.artifact }}
+
+      - name: Package (tar)
+        if: matrix.pack == 'tar'
+        run: tar -czf ${{ matrix.archive }} -C dist ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: ${{ matrix.archive }}
+
+  release:
+    needs: [tag, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Generate checksums
+        id: checksums
+        run: |
+          sha256sum RiotUnlocker-*.zip RiotUnlocker-*.tar.gz | tee checksums.sha256
+          body="${{ needs.tag.outputs.notes }}"$'\n\n''**SHA256**'$'\n''```'$'\n'"$(cat checksums.sha256)"$'\n''```'
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          echo "$body" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.tag.outputs.tag }}
+          name: ${{ needs.tag.outputs.tag }}
+          body: ${{ steps.checksums.outputs.body }}
+          generate_release_notes: false
+          files: |
+            RiotUnlocker-*.zip
+            RiotUnlocker-*.tar.gz
+            checksums.sha256
