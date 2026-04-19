@@ -282,14 +282,25 @@ class Program
 
     static string? GetPrefsDir()
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(home, ".config", "unity3d", "DefaultCompany", "Riot");
-        }
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return null;
         // Windows uses registry — prefs not needed since DLL patch covers it
         // macOS uses plist — not implemented, DLL patch is enough
-        return null;
+
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var unityRoot = Path.Combine(home, ".config", "unity3d");
+
+        if (Directory.Exists(unityRoot))
+        {
+            foreach (var company in Directory.EnumerateDirectories(unityRoot))
+            {
+                var riotDir = Path.Combine(company, "Riot");
+                if (Directory.Exists(riotDir))
+                    return riotDir;
+            }
+        }
+
+        return Path.Combine(unityRoot, "DefaultCompany", "Riot");
     }
 
     static void Ok(string msg)
